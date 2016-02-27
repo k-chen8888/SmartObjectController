@@ -17,16 +17,14 @@ public abstract class SmartObject : MonoBehaviour
     public GameObject[] targets;
 
     // States and transitions
+    protected static int NOT_A_STATE = -2; // Constant value that means "not an actual state in the machine"
     protected static int BAD_STATE = -1; // A transition that wasn't supposed to happen leads to a bad state
-    protected static int INIT_STATE = -0; // All objects, by default, start out on this state
-    protected int startState;
+    protected static int INIT_STATE = 0; // All objects, by default, start out on this state
+    public int startState;
     protected int currState;
-    protected bool changingState = false;
-    protected Dictionary<int, string> states = new Dictionary<int, string>
-    {
-        { BAD_STATE, "LeaveBadState" },
-        { INIT_STATE, "InitialState" }
-    };
+    protected IEnumerator prevRoutine, currRoutine;
+    protected int nextState = NOT_A_STATE;
+    protected Dictionary<int, IEnumerator> states = new Dictionary<int, IEnumerator>();
     protected Dictionary<int, List<int>> transitions = new Dictionary<int, List<int>>
     {
         { BAD_STATE, new List<int> (new int[] { INIT_STATE }) }
@@ -40,6 +38,14 @@ public abstract class SmartObject : MonoBehaviour
     // Easing function
     [Range(0, 2)]
     public float easeFactor = 1;
+
+
+    // Always runs on startup
+    void Awake()
+    {
+        states.Add(BAD_STATE, LeaveBadState());
+        states.Add(INIT_STATE, InitialState());
+    }
 
 
     /* Struct that defines basic information about the object's initial state
@@ -80,7 +86,7 @@ public abstract class SmartObject : MonoBehaviour
      */
     // A generic state that doesn't really do anything...
     // Override this with an actual initial state
-    protected virtual IEnumerator InitialState ()
+    protected virtual IEnumerator InitialState()
     {
         while (true)
         {
@@ -90,15 +96,20 @@ public abstract class SmartObject : MonoBehaviour
     }
 
     // Gets out of bad states (default to going to INIT_STATE)
-    protected virtual IEnumerator LeaveBadState(int nextState = 0)
+    protected virtual IEnumerator LeaveBadState()
     {
         StopAllCoroutines();
         currState = nextState;
         ResetObject();
 
-        string next = null;
-        states.TryGetValue(nextState, out next);
-        yield return StartCoroutine((next != null ? next : "InitialState"));
+        IEnumerator next = null;
+        if (states.TryGetValue(nextState, out next))
+            yield return StartCoroutine(next);
+        else
+            yield return StartCoroutine(InitialState());
+
+        nextState = NOT_A_STATE;
+        yield break;
     }
 
 
@@ -106,25 +117,16 @@ public abstract class SmartObject : MonoBehaviour
      * At the very least, override this to change which error-handling co-routine gets called
      */
     // Single action
-    protected virtual IEnumerator ChangeState(int nextState = 0)
+    protected virtual IEnumerator ChangeState()
     {
-        string next = null;
-        states.TryGetValue(nextState, out next);
+        IEnumerator next = null;
+        if (states.TryGetValue(nextState, out next))
+            yield return StartCoroutine(next);
+        else
+            yield return StartCoroutine(InitialState());
 
-        yield return StartCoroutine((next != null ? next : "InitialState"));
-    }
-
-    // Sequence of actions
-    // For simplicity's sake, override this to use it
-    protected virtual IEnumerator ChangeStateList(List<int> nextStates)
-    {
-        // This method should proceed along a list of defined states
-        yield return null;
-    }
-    protected virtual IEnumerator ChangeStateTarget(int nextState = 0)
-    {
-        // This method should end up at a specified "next" state
-        yield return null;
+        nextState = NOT_A_STATE;
+        yield break;
     }
 
 
@@ -187,6 +189,44 @@ public abstract class SmartObject : MonoBehaviour
     {
 
     }
+
+    // Safely starts a coroutine
+    // Can be done using (1) an IEnumerator or (2) an index in the dictionary and a new IEnumerator instance to replace it
+    // Note: IEnumerator coroutines can only be started once, which means that the IEnumerator needs to be replaced
+    protected void SafeStartCoroutine(IEnumerator next)
+    {
+        prevRoutine = currRoutine;
+        currRoutine = next;
+        StartCoroutine(currRoutine);
+
+        if (prevRoutine != null)
+        {
+            StopCoroutine(prevRoutine);
+            prevRoutine = null;
+        }
+    }
+    protected bool SafeStartCoroutine(int key)
+    {
+        IEnumerator next;
+        
+        if ((states.TryGetValue(key, out next)))
+        {
+            prevRoutine = currRoutine;
+            currRoutine = next;
+            StartCoroutine(currRoutine);
+
+            if (prevRoutine != null)
+            {
+                StopCoroutine(prevRoutine);
+                prevRoutine = null;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
 
     // Movement Easing equation: y = x^a / (x^a + (1-x)^a)
     //

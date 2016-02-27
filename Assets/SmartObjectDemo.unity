@@ -376,6 +376,7 @@ MonoBehaviour:
   transitionWait: 0
   targets:
   - {fileID: 672213299}
+  startState: 0
   easeFactor: 1
   attract: 0
   followDist: 3
@@ -617,8 +618,8 @@ MonoBehaviour:
   transitionWait: 0
   targets:
   - {fileID: 672213299}
+  startState: 0
   easeFactor: 1
-  lightStartState: 0
   onDistance: 2
   offDistance: 3
   disableTimer: 1
@@ -960,6 +961,7 @@ MonoBehaviour:
   transitionWait: 0
   targets:
   - {fileID: 672213299}
+  startState: 0
   easeFactor: 1
   doorStartState: 2
   unlockDistance: 1

@@ -11,7 +11,6 @@ public class SmartLight : SmartObject {
 
     // States
     private enum States { ON, OFF, FLICKER, TURN_ON, TURN_OFF, DISABLE };
-    public int lightStartState = (int)States.ON;
 
     // Interaction distances
     public float onDistance = 10.0f;
@@ -31,7 +30,6 @@ public class SmartLight : SmartObject {
         mainLight = GetComponent<Light>();
 
         // Start on the starting state
-        startState = lightStartState;
         currState = startState;
         SetInitData();
 
@@ -40,9 +38,8 @@ public class SmartLight : SmartObject {
         AddNewTransitions();
 
         // Set the light to its starting state
-        string next = null;
-        states.TryGetValue(startState, out next);
-        StartCoroutine((next != null ? next : "LightOn"));
+        IEnumerator next;
+        SafeStartCoroutine(states.TryGetValue(startState, out next) ? next : LightOn());
     }
 	
 	// Update is called once per frame
@@ -56,189 +53,204 @@ public class SmartLight : SmartObject {
     // Describes the state "The light is on"
     private IEnumerator LightOn()
     {
-        // Turns the light on when started
-        mainLight.enabled = true;
-
-        while (!changingState)
+        while (true)
         {
-            float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
-            
-            if (distToPlayer >= offDistance)
+            if (currState == (int)States.ON)
             {
-                // Should I turn off?
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.OFF));
-            }
-            else if (distToPlayer < offDistance && distToPlayer > onDistance)
-            {
-                // Eerie flickering effect
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.FLICKER));
-            }
-            else
-            {
-                // Just keep on keeping on...
-                yield return null;
-            }
-        }
+                // Turns the light on when started
+                mainLight.enabled = true;
 
-        yield return null;
+                float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
+
+                if (distToPlayer >= offDistance)
+                {
+                    // Should I turn off?
+                    nextState = (int)States.OFF;
+                    SafeStartCoroutine(ChangeState());
+                    yield return null;
+                }
+                else if (distToPlayer < offDistance && distToPlayer > onDistance)
+                {
+                    // Eerie flickering effect
+                    nextState = (int)States.FLICKER;
+                    SafeStartCoroutine(ChangeState());
+                    yield return null;
+                }
+            }
+
+            // Just keep on keeping on...
+            yield return null;
+        }
     }
 
     // Describes the state "The light is off"
     private IEnumerator LightOff()
     {
-        // Turns the light off when started
-        mainLight.enabled = false;
-
-        while (!changingState)
+        while (true)
         {
-            float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
+            // Turns the light off when started
+            mainLight.enabled = false;
 
-            if (distToPlayer < offDistance && distToPlayer > onDistance)
+            if (currState == (int)States.OFF)
             {
-                // Eerie flickering effect
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.FLICKER));
+                float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
+
+                if (distToPlayer < offDistance && distToPlayer > onDistance)
+                {
+                    // Eerie flickering effect
+                    nextState = (int)States.FLICKER;
+                    SafeStartCoroutine(ChangeState());
+                    yield break;
+                }
+                else if (distToPlayer <= onDistance)
+                {
+                    // Should I turn on?
+                    nextState = (int)States.ON;
+                    SafeStartCoroutine(ChangeState());
+                    yield break;
+                }
             }
-            else if (distToPlayer <= onDistance)
-            {
-                // Should I turn on?
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.ON));
-            }
-            else
-            {
-                // Just keep on keeping on...
-                yield return null;
-            }
+
+            // Just keep on keeping on...
+            yield return null;
         }
-
-        yield return null;
     }
 
     // Describes the state "The light is flickering"
     private IEnumerator LightFlicker()
     {
         float nextChange = Time.time;
-
-        while (!changingState)
+        
+        while (true)
         {
-            float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
+            if (currState == (int)States.FLICKER)
+            {
+                float distToPlayer = Vector3.Distance(mainLight.transform.position, targets[PLAYER].transform.position);
 
-            if (distToPlayer >= offDistance)
-            {
-                // Should I turn off?
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.OFF));
-            }
-            else if (distToPlayer <= onDistance)
-            {
-                // Should I turn on?
-                changingState = true;
-                yield return StartCoroutine(ChangeState((int)States.ON));
-            }
-            else
-            {
-                // Just keep on keeping on...
-                if (Time.time > nextChange)
+                if (distToPlayer >= offDistance)
                 {
-                    mainLight.enabled = !mainLight.enabled;
-                    nextChange += Random.Range(0, maxFlickerWait);
+                    // Should I turn off?
+                    nextState = (int)States.OFF;
+                    SafeStartCoroutine(ChangeState());
+                    yield return null;
                 }
-                yield return null;
+                else if (distToPlayer <= onDistance)
+                {
+                    // Should I turn on?
+                    nextState = (int)States.ON;
+                    SafeStartCoroutine(ChangeState());
+                    yield return null;
+                }
+                else
+                {
+                    // Just keep on keeping on...
+                    if (Time.time > nextChange)
+                    {
+                        mainLight.enabled = !mainLight.enabled;
+                        nextChange += Random.Range(0, maxFlickerWait);
+                    }
+                    yield return null;
+                }
             }
-        }
 
-        yield return null;
+            yield return null;
+        }
     }
 
     // Describes the state "The light has been forcibly turned on"
     private IEnumerator LightForceOn()
     {
-        while (!changingState)
+        while (true)
         {
-            mainLight.enabled = true;
-            yield return null;
-        }
+            if (currState == (int)States.TURN_ON)
+                mainLight.enabled = true;
 
-        yield return null;
+            yield return null;
+            
+        }
     }
 
     // Describes the state "The light has been forcibly turned off"
     private IEnumerator LightForceOff()
     {
-        while (!changingState)
+        while (true)
         {
-            mainLight.enabled = false;
+            if (currState == (int)States.TURN_OFF)
+                mainLight.enabled = false;
+
             yield return null;
         }
-
-        yield return null;
     }
 
     // Describes the state "The light has been forcibly disabled"
     private IEnumerator LightDisable()
     {
-        while (!changingState)
+        while (true)
         {
             print("Disabled... I cannot recover from this state");
             yield return new WaitForSeconds(disableTimer);
         }
-
-        yield return null;
     }
     public void DisableLight()
     {
         // Call this from the outside to disable the light for good
         if (currState != (int)States.DISABLE)
         {
-            changingState = true;
-            StartCoroutine(ChangeState((int)States.DISABLE));
+            nextState = (int)States.DISABLE;
+            SafeStartCoroutine(ChangeState());
         }
     }
 
     // Because a custom starting configuration was defined, need to override LeaveBadState()
-    protected override IEnumerator LeaveBadState(int nextState = 0)
+    protected override IEnumerator LeaveBadState()
     {
         StopAllCoroutines();
-        changingState = false;
         currState = nextState;
         ResetObject();
 
-        string next = null;
-        states.TryGetValue(nextState, out next);
-        yield return StartCoroutine((next != null ? next : "LightOn"));
+        IEnumerator next;
+        if (states.TryGetValue(nextState, out next))
+        {
+            currState = nextState;
+            SafeStartCoroutine(next);
+        }
+        else
+        {
+            currState = startState;
+            SafeStartCoroutine(LightOn());
+        }
+
+        nextState = NOT_A_STATE;
+        yield break;
     }
 
 
     /* Transition co-routine
      */
-    protected override IEnumerator ChangeState(int nextState = 0)
+    protected override IEnumerator ChangeState()
     {
         // Check for a valid transition
         if (ExistsTransition(nextState))
         {
-            string coroutine = null;
-
-            // Stop the current state
-            states.TryGetValue(currState, out coroutine);
-            if (coroutine != null)
-                StopCoroutine(coroutine);
-
+            IEnumerator coroutine;
+            
             // Start the next state
-            changingState = false;
-            states.TryGetValue(nextState, out coroutine);
-            if (coroutine != null)
+            if (states.TryGetValue(nextState, out coroutine))
             {
                 // Complete change to state
                 currState = nextState;
-                yield return StartCoroutine(coroutine);
+                nextState = NOT_A_STATE;
+                SafeStartCoroutine(coroutine);
+                yield break;
             }
         }
-
-        // Whoops! Try to recover...
-        yield return StartCoroutine(LeaveBadState(currState));
+        else
+        {
+            // Whoops! Try to recover...
+            nextState = startState;
+            SafeStartCoroutine(LeaveBadState());
+            yield break;
+        }
     }
 
 
@@ -252,15 +264,15 @@ public class SmartLight : SmartObject {
 
         // Replace the old default LeaveBadState()
         states.Remove(BAD_STATE);
-        states.Add(BAD_STATE, "LeaveBadState");
+        states.Add(BAD_STATE, LeaveBadState());
 
         // Add the new states
-        states.Add((int)States.ON, "LightOn");
-        states.Add((int)States.OFF, "LightOff");
-        states.Add((int)States.FLICKER, "LightFlicker");
-        states.Add((int)States.TURN_ON, "LightForceOn");
-        states.Add((int)States.TURN_OFF, "LightForceOff");
-        states.Add((int)States.DISABLE, "LightDisable");
+        states.Add((int)States.ON, LightOn());
+        states.Add((int)States.OFF, LightOff());
+        states.Add((int)States.FLICKER, LightFlicker());
+        states.Add((int)States.TURN_ON, LightForceOn());
+        states.Add((int)States.TURN_OFF, LightForceOff());
+        states.Add((int)States.DISABLE, LightDisable());
     }
 
     // Override to add new transitions to the FSM
@@ -342,13 +354,13 @@ public class SmartLight : SmartObject {
         {
             if (currState != (int)States.TURN_ON && currState != (int)States.ON)
             {
-                changingState = true;
-                StartCoroutine(ChangeState((int)States.TURN_ON));
+                nextState = (int)States.TURN_ON;
+                StartCoroutine(ChangeState());
             }
             else if (currState != (int)States.TURN_OFF && currState != (int)States.OFF)
             {
-                changingState = true;
-                StartCoroutine(ChangeState((int)States.TURN_OFF));
+                nextState = (int)States.TURN_OFF;
+                StartCoroutine(ChangeState());
             }
         }
     }

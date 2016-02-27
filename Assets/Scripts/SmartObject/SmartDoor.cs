@@ -14,7 +14,6 @@ public class SmartDoor : SmartObject
     // States
     private enum States { OPEN, AJAR, CLOSED, LOCKED };
     public int doorStartState = (int)States.LOCKED;
-    private int globalNextState = 0;
 
     // Identifying objects in the array
     private int KEY = 1;
@@ -26,6 +25,7 @@ public class SmartDoor : SmartObject
     public float openSpeed = 1.0f;
     public Vector3 closedPosition;
     public Vector3 openPosition;
+    private float percentTravelled = 1.0f;
 
 
     // Use this for initialization
@@ -46,9 +46,8 @@ public class SmartDoor : SmartObject
         AddNewTransitions();
 
         // Set the door to its starting state
-        string next = null;
-        states.TryGetValue(startState, out next);
-        StartCoroutine((next != null ? next : "DoorLocked"), 0);
+        IEnumerator next;
+        StartCoroutine((states.TryGetValue(startState, out next) ? next : DoorLocked()));
     }
 
     // Update is called once per frame
@@ -61,16 +60,15 @@ public class SmartDoor : SmartObject
     /* States
      */
     // The door is open
-    private IEnumerator DoorOpen(int nextState = 0)
+    private IEnumerator DoorOpen()
     {
-        while (!changingState)
+        while (nextState == NOT_A_STATE)
         {
             if (automatic && Vector3.Distance(targets[PLAYER].transform.position, closedPosition) > openDistance)
             {
                 // Automatic doors close when the player is too far away
-                changingState = true;
                 yield return StartCoroutine("ChangeStateTarget", (int)States.CLOSED);
-                break;
+                yield break;
             }
             else
             {
@@ -78,14 +76,13 @@ public class SmartDoor : SmartObject
             }
         }
 
-        yield return null;
+        yield break;
     }
 
     // The door is ajar
-    private IEnumerator DoorAjar(int nextState = 0)
+    private IEnumerator DoorAjar()
     {
-        float moveDistance = 0.0f,
-              percentTravelled = 0.0f;
+        float moveDistance = 0.0f;
         Vector3 startLocation = Vector3.zero,
                 targetLocation = Vector3.zero;
 
@@ -110,6 +107,7 @@ public class SmartDoor : SmartObject
             moveDistance = Vector3.Distance(startLocation, targetLocation);
         }
 
+        percentTravelled = 0.0f;
         while (percentTravelled < 1.0f && moveDistance > 0 && currState == (int)States.AJAR)
         {
             // Calculate easing between current and target locations
@@ -126,16 +124,15 @@ public class SmartDoor : SmartObject
             if (percentTravelled >= 1.0f)
             {
                 // What should happen next?
-                changingState = true;
                 if (nextState == (int)States.OPEN || nextState == (int)States.CLOSED)
                 {
                     yield return StartCoroutine("ChangeState", nextState);
-                    break;
+                    yield break;
                 }
                 else if (nextState == (int)States.LOCKED)
                 {
                     yield return StartCoroutine("ChangeStateTarget", nextState);
-                    break;
+                    yield break;
                 }
             }
 
@@ -143,29 +140,30 @@ public class SmartDoor : SmartObject
             yield return null;
         }
 
-        yield return null;
+        yield break;
     }
 
     // The door is closed
-    private IEnumerator DoorClosed(int nextState = 0)
+    private IEnumerator DoorClosed()
     {
         // The door is meant to be locked immediately afterwards
         // This can only happen when the co-routine is started up; otherwise, the lock method would be called
         if (nextState == (int)States.LOCKED)
         {
-            changingState = true;
-            yield return StartCoroutine("ChangeState", (int)States.LOCKED);
+            nextState = (int)States.LOCKED;
+            yield return StartCoroutine(ChangeState());
+            yield break;
         }
         else
         {
-            while (!changingState)
+            while (nextState == NOT_A_STATE)
             {
                 if (automatic && Vector3.Distance(targets[PLAYER].transform.position, closedPosition) <= openDistance)
                 {
                     // Automatic doors open when the player is close enough
-                    changingState = true;
-                    yield return StartCoroutine("ChangeStateTarget", (int)States.OPEN);
-                    break;
+                    nextState = (int)States.OPEN;
+                    yield return StartCoroutine(ChangeState());
+                    yield break;
                 }
                 else
                 {
@@ -174,70 +172,93 @@ public class SmartDoor : SmartObject
             }
         }
 
-        yield return null;
+        yield break;
     }
     
 
     // The door is locked
     // The only way to change this state is externally
-    private IEnumerator DoorLocked(int nextState = 0)
+    private IEnumerator DoorLocked()
     {
-        while (!changingState)
+        while (nextState == NOT_A_STATE)
         {
             yield return null;
         }
 
-        yield return null;
+        yield break;
     }
 
     // Gets out of bad states (default to going to INIT_STATE)
-    protected override IEnumerator LeaveBadState(int nextState = 0)
+    protected override IEnumerator LeaveBadState()
     {
         StopAllCoroutines();
         currState = nextState;
         ResetObject();
 
-        string next = null;
-        states.TryGetValue(nextState, out next);
-        yield return StartCoroutine((next != null ? next : "DoorLocked"), 0);
+        IEnumerator next;
+        yield return StartCoroutine((states.TryGetValue(nextState, out next) ? next : DoorLocked()));
+
+        nextState = NOT_A_STATE;
+        yield break;
     }
 
 
     /* Transition co-routine
      */
-    protected override IEnumerator ChangeState(int nextState = 0)
+    protected override IEnumerator ChangeState()
     {
         // Check for a valid transition
         if (ExistsTransition(nextState))
         {
-            string coroutine = null;
-
-            // Stop the current state
-            states.TryGetValue(currState, out coroutine);
-            if (coroutine != null)
-                StopCoroutine(coroutine);
+            IEnumerator coroutine;
 
             // Start the next state
-            changingState = false;
-            states.TryGetValue(nextState, out coroutine);
-            if (coroutine != null)
+            if (states.TryGetValue(nextState, out coroutine))
             {
                 // Complete change to state
                 currState = nextState;
-                yield return StartCoroutine(coroutine, 0);
+                yield return StartCoroutine(coroutine);
             }
         }
 
         // Whoops! Try to recover...
-        yield return StartCoroutine(LeaveBadState(startState));
+        nextState = startState;
+        yield return StartCoroutine(LeaveBadState());
+    }
+
+    // Helper transition function that handles closing a door when it is open
+    private IEnumerator OpenToClose()
+    {
+        IEnumerator coroutine = null;
+
+        if (currState == (int)States.OPEN)
+        {
+            nextState = (int)States.AJAR;
+            if (states.TryGetValue(nextState, out coroutine))
+            {
+                // Complete change to AJAR state
+                currState = nextState;
+                nextState = (int)States.CLOSED;
+                yield return StartCoroutine(coroutine);
+
+                // Do nothing until AJAR finishes
+                while (percentTravelled < 1.0f) { }
+
+
+            }
+        }
+
+        // Whoops! Try to recover...
+        nextState = startState;
+        yield return StartCoroutine(LeaveBadState());
+        yield break;
     }
 
     // Helper for transition coroutine
     // Check if there's a sequence of actions that need to be performed
-    protected override IEnumerator ChangeStateTarget(int nextState = 0)
+    protected IEnumerator ChangeStateTarget(int targetState)
     {
-        // Save the global state
-        globalNextState = nextState;
+        IEnumerator coroutine;
 
         // OPEN -> AJAR -> CLOSED or CLOSED -> AJAR -> OPEN or OPEN -> AJAR -> CLOSED -> LOCKED
         // In AJAR, handle the following:
@@ -250,21 +271,12 @@ public class SmartDoor : SmartObject
         {
             if (ExistsTransition((int)States.AJAR))
             {
-                string coroutine = null;
-
-                // Stop the current state
-                states.TryGetValue(currState, out coroutine);
-                if (coroutine != null)
-                    StopCoroutine(coroutine);
-
                 // Start the next state
-                changingState = false;
-                states.TryGetValue((int)States.AJAR, out coroutine);
-                if (coroutine != null)
+                if (states.TryGetValue((int)States.AJAR, out coroutine))
                 {
                     // Complete change to state
                     currState = (int)States.AJAR;
-                    yield return StartCoroutine(coroutine, nextState);
+                    yield return StartCoroutine(coroutine);
                 }
             }
         }
@@ -272,27 +284,20 @@ public class SmartDoor : SmartObject
         {
             if (ExistsTransition((int)States.CLOSED))
             {
-                string coroutine = null;
-
-                // Stop the current state
-                states.TryGetValue(currState, out coroutine);
-                if (coroutine != null)
-                    StopCoroutine(coroutine);
-
                 // Start the next state
-                changingState = false;
-                states.TryGetValue((int)States.CLOSED, out coroutine);
-                if (coroutine != null)
+                if (states.TryGetValue((int)States.CLOSED, out coroutine))
                 {
                     // Complete change to state
                     currState = (int)States.CLOSED;
-                    yield return StartCoroutine(coroutine, nextState);
+                    yield return StartCoroutine(coroutine);
                 }
             }
         }
 
         // Whoops! Try to recover...
-        yield return StartCoroutine(LeaveBadState(startState));
+        nextState = startState;
+        yield return StartCoroutine(LeaveBadState());
+        yield break;
     }
 
 
@@ -306,13 +311,13 @@ public class SmartDoor : SmartObject
 
         // Replace the old default LeaveBadState()
         states.Remove(BAD_STATE);
-        states.Add(BAD_STATE, "LeaveBadState");
+        states.Add(BAD_STATE, LeaveBadState());
 
         // Add the new states
-        states.Add((int)States.OPEN, "DoorOpen");
-        states.Add((int)States.AJAR, "DoorAjar");
-        states.Add((int)States.CLOSED, "DoorClosed");
-        states.Add((int)States.LOCKED, "DoorLocked");
+        states.Add((int)States.OPEN, DoorOpen());
+        states.Add((int)States.AJAR, DoorAjar());
+        states.Add((int)States.CLOSED, DoorClosed());
+        states.Add((int)States.LOCKED, DoorLocked());
     }
 
     // Override to add new transitions to the FSM
@@ -364,8 +369,8 @@ public class SmartDoor : SmartObject
         // Non-automatic doors can only open/close when interacted with
         if (!automatic)
         {
-            changingState = true;
-            StartCoroutine(ChangeState((int)States.AJAR));
+            nextState = (int)States.AJAR;
+            StartCoroutine(ChangeState());
         }
     }
 
@@ -375,18 +380,20 @@ public class SmartDoor : SmartObject
         // Make sure the key has been brought in range of the door
         if (Vector3.Distance(targets[KEY].transform.position, transform.position) <= unlockDistance)
         {
-            changingState = true;
             if (currState == (int)States.LOCKED)
             {
-                StartCoroutine(ChangeState((int)States.CLOSED));
+                nextState = (int)States.CLOSED;
+                StartCoroutine(ChangeState());
             }
             else if (currState == (int)States.OPEN)
             {
+                nextState = (int)States.LOCKED;
                 StartCoroutine(ChangeStateTarget((int)States.LOCKED));
             }
             else if (currState == (int)States.CLOSED)
             {
-                StartCoroutine(ChangeState((int)States.LOCKED));
+                nextState = (int)States.LOCKED;
+                StartCoroutine(ChangeState());
             }
         }
     }
